@@ -39,18 +39,22 @@ function truncateText(ctx, text, maxWidth) {
   return str + '...';
 }
 
-// Get effective date
+// Get effective date - use the date passed from app, which already has sendForNextDay applied
 function getEffectiveDate(effectiveDateStr) {
   let date;
   if (effectiveDateStr) {
     date = new Date(effectiveDateStr);
     if (isNaN(date.getTime())) {
+      // Fallback: tomorrow in Sydney timezone
       date = new Date();
       date.setDate(date.getDate() + 1);
     }
+    console.log('Using effective date from app:', effectiveDateStr, '→', date.toISOString());
   } else {
+    // Fallback: tomorrow in Sydney timezone
     date = new Date();
     date.setDate(date.getDate() + 1);
+    console.log('No date provided, using tomorrow:', date.toISOString());
   }
   return date;
 }
@@ -115,7 +119,14 @@ function generatePricelistImage(priceData, effectiveDateStr, salesmanInfo) {
 
   ctx.textAlign = 'right';
   const effectiveDate = getEffectiveDate(effectiveDateStr);
-  const formattedDate = effectiveDate.toLocaleDateString('en-AU', { year: 'numeric', month: 'long', day: 'numeric' });
+  // Format date in Australian format, using UTC to avoid timezone issues
+  const formattedDate = effectiveDate.toLocaleDateString('en-AU', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'Australia/Sydney'
+  });
+  console.log('Formatted date for image:', formattedDate);
   ctx.fillText('Effective: ' + formattedDate, rightCol, y + 60);
   y += 150;
 
