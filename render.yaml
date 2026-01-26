@@ -2,8 +2,10 @@ services:
   - type: web
     name: everfresh-pricelist-api
     runtime: node
+    plan: free
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: npm start
+    healthCheckPath: /
     envVars:
       - key: NODE_VERSION
         value: 18.19.0

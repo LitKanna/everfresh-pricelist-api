@@ -2,7 +2,11 @@
 
 Node.js API server that generates pricelist images using HTML Canvas. Exact replica of the web app's pricelist image generation.
 
-## Quick Deploy to Render.com (Free)
+## One-Click Deploy
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/LitKanna/everfresh-pricelist-api)
+
+## Manual Deploy to Render.com (Free)
 
 1. Push this folder to a new GitHub repository
 2. Go to [Render.com](https://render.com)
