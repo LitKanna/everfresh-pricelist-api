@@ -646,3 +646,4 @@ app.post('/api/generate-invoice', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Everfresh Pricelist API running on port ${PORT}`);
 });
+
