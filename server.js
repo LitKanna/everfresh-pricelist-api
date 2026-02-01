@@ -8,6 +8,7 @@ const express = require('express');
 const cors = require('cors');
 const { createCanvas } = require('canvas');
 const { createClient } = require('@supabase/supabase-js');
+const PDFDocument = require('pdfkit');
 
 const app = express();
 app.use(cors());
@@ -323,6 +324,321 @@ app.post('/api/generate', async (req, res) => {
 
   } catch (error) {
     console.error('Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// INVOICE PDF GENERATION
+// ============================================
+
+// Helper function to format currency
+function formatInvoiceCurrency(amount) {
+  const num = parseFloat(amount) || 0;
+  return '$' + num.toFixed(2);
+}
+
+// Helper function to format date for invoice
+function formatInvoiceDate(dateStr) {
+  const date = dateStr ? new Date(dateStr) : new Date();
+  return date.toLocaleDateString('en-AU', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'Australia/Sydney'
+  });
+}
+
+// Generate PDF Invoice
+function generateInvoicePDF(order, salesmanInfo) {
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({
+        size: 'A4',
+        margin: 50,
+        info: {
+          Title: `Invoice ${order.invoiceNumber || ''}`,
+          Author: 'EVERFRESH PRODUCE GROUP',
+        }
+      });
+
+      const chunks = [];
+      doc.on('data', chunk => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      const pageWidth = 595.28;
+      const margin = 50;
+      const contentWidth = pageWidth - (margin * 2);
+
+      // Colors
+      const darkGreen = '#2d6a4f';
+      const mediumGreen = '#40916c';
+      const lightGreen = '#d8f3dc';
+      const darkText = '#1a1a1a';
+      const grayText = '#666666';
+
+      let y = 50;
+
+      // Company Header
+      doc.fillColor(darkGreen)
+         .fontSize(18)
+         .font('Helvetica-Bold')
+         .text('EVERFRESH PRODUCE GROUP', margin, y, { align: 'center', width: contentWidth });
+      y += 25;
+
+      doc.fillColor(grayText)
+         .fontSize(10)
+         .font('Helvetica')
+         .text('Stand 275, Shed C, Sydney Markets', margin, y, { align: 'center', width: contentWidth });
+      y += 30;
+
+      // Separator line
+      doc.strokeColor(lightGreen)
+         .lineWidth(2)
+         .moveTo(margin, y)
+         .lineTo(pageWidth - margin, y)
+         .stroke();
+      y += 25;
+
+      // INVOICE title
+      doc.fillColor(mediumGreen)
+         .fontSize(24)
+         .font('Helvetica-Bold')
+         .text('INVOICE', margin, y, { align: 'center', width: contentWidth });
+      y += 40;
+
+      // Invoice details row
+      const leftCol = margin;
+      const rightCol = pageWidth - margin - 150;
+
+      // Invoice number and date
+      doc.fillColor(darkText)
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text('Invoice #:', leftCol, y);
+      doc.font('Helvetica')
+         .text(order.invoiceNumber || 'N/A', leftCol + 60, y);
+
+      doc.font('Helvetica-Bold')
+         .text('Date:', rightCol, y);
+      doc.font('Helvetica')
+         .text(formatInvoiceDate(order.createdAt), rightCol + 35, y);
+      y += 20;
+
+      // Customer
+      doc.font('Helvetica-Bold')
+         .text('Customer:', leftCol, y);
+      doc.font('Helvetica')
+         .text(order.customerName || 'N/A', leftCol + 60, y);
+      y += 30;
+
+      // Separator
+      doc.strokeColor('#e2e8f0')
+         .lineWidth(1)
+         .moveTo(margin, y)
+         .lineTo(pageWidth - margin, y)
+         .stroke();
+      y += 20;
+
+      // Items Table Header
+      const col1 = margin;
+      const col2 = margin + contentWidth * 0.45;
+      const col3 = margin + contentWidth * 0.60;
+      const col4 = margin + contentWidth * 0.75;
+      const col5 = pageWidth - margin;
+
+      // Table header background
+      doc.rect(margin, y, contentWidth, 25)
+         .fill(mediumGreen);
+
+      doc.fillColor('#ffffff')
+         .fontSize(9)
+         .font('Helvetica-Bold');
+      doc.text('ITEM', col1 + 5, y + 8);
+      doc.text('GRADE', col2 + 5, y + 8);
+      doc.text('QTY', col3 + 5, y + 8);
+      doc.text('PRICE', col4 + 5, y + 8);
+      doc.text('TOTAL', col5 - 50, y + 8, { width: 45, align: 'right' });
+      y += 25;
+
+      // Determine which items to show
+      const hasDiscrepancies = order.hasDiscrepancies && order.packedItems && order.packedItems.length > 0;
+      const displayItems = hasDiscrepancies
+        ? order.packedItems.filter(item => !item.isRemoved && (item.packedQty || 0) > 0)
+        : (order.items || []);
+
+      // Items rows
+      doc.fontSize(9).font('Helvetica');
+      let rowIndex = 0;
+
+      displayItems.forEach((item, index) => {
+        const qty = item.packedQty || item.qty || 1;
+        const priceStr = (item.price || '').toString().replace('$', '');
+        const price = parseFloat(priceStr) || 0;
+        const lineTotal = item.lineTotal || (qty * price);
+
+        // Alternating row background
+        if (rowIndex % 2 === 1) {
+          doc.rect(margin, y, contentWidth, 22).fill('#f8fafc');
+        }
+
+        // Row border
+        doc.strokeColor('#e2e8f0')
+           .lineWidth(0.5)
+           .rect(margin, y, contentWidth, 22)
+           .stroke();
+
+        doc.fillColor(darkText);
+
+        // Item name (with truncation)
+        const itemName = item.name || '';
+        const maxNameWidth = col2 - col1 - 10;
+        doc.text(itemName.length > 25 ? itemName.substring(0, 25) + '...' : itemName, col1 + 5, y + 7, { width: maxNameWidth });
+
+        // Grade
+        doc.text(item.grade || '', col2 + 5, y + 7, { width: col3 - col2 - 10 });
+
+        // Quantity
+        doc.text(qty.toString(), col3 + 5, y + 7);
+
+        // Price
+        doc.text(formatInvoiceCurrency(price), col4 + 5, y + 7);
+
+        // Total
+        doc.text(formatInvoiceCurrency(lineTotal), col5 - 50, y + 7, { width: 45, align: 'right' });
+
+        y += 22;
+        rowIndex++;
+
+        // Check if we need a new page
+        if (y > 700) {
+          doc.addPage();
+          y = 50;
+        }
+      });
+
+      y += 15;
+
+      // Totals section
+      doc.strokeColor('#e2e8f0')
+         .lineWidth(1)
+         .moveTo(margin, y)
+         .lineTo(pageWidth - margin, y)
+         .stroke();
+      y += 20;
+
+      const totalsX = pageWidth - margin - 150;
+      const totalsValueX = pageWidth - margin - 60;
+
+      // Final total
+      const finalTotal = order.packedTotal || order.grandTotal || 0;
+      doc.fillColor(darkText)
+         .fontSize(12)
+         .font('Helvetica-Bold')
+         .text('TOTAL:', totalsX, y);
+      doc.text(formatInvoiceCurrency(finalTotal), totalsValueX, y, { width: 55, align: 'right' });
+      y += 40;
+
+      // Notes section (if present)
+      if (order.notes) {
+        doc.strokeColor('#e2e8f0')
+           .lineWidth(1)
+           .moveTo(margin, y)
+           .lineTo(pageWidth - margin, y)
+           .stroke();
+        y += 15;
+
+        doc.fillColor(darkText)
+           .fontSize(10)
+           .font('Helvetica-Bold')
+           .text('Notes:', margin, y);
+        y += 15;
+
+        doc.fillColor(grayText)
+           .fontSize(9)
+           .font('Helvetica')
+           .text(order.notes, margin, y, { width: contentWidth });
+        y += 30;
+      }
+
+      // Footer
+      y = 750; // Position near bottom
+
+      doc.strokeColor(lightGreen)
+         .lineWidth(2)
+         .moveTo(margin, y)
+         .lineTo(pageWidth - margin, y)
+         .stroke();
+      y += 15;
+
+      doc.fillColor(mediumGreen)
+         .fontSize(10)
+         .font('Helvetica')
+         .text('Thank you for your business!', margin, y, { align: 'center', width: contentWidth });
+      y += 18;
+
+      // Sales contact
+      if (salesmanInfo && (salesmanInfo.name || salesmanInfo.phone)) {
+        doc.fillColor(grayText)
+           .fontSize(9);
+        if (salesmanInfo.name && salesmanInfo.phone) {
+          doc.text(`Sales Contact: ${salesmanInfo.name} - ${salesmanInfo.phone}`, margin, y, { align: 'center', width: contentWidth });
+        } else if (salesmanInfo.name) {
+          doc.text(`Sales Contact: ${salesmanInfo.name}`, margin, y, { align: 'center', width: contentWidth });
+        } else {
+          doc.text(`Contact: ${salesmanInfo.phone}`, margin, y, { align: 'center', width: contentWidth });
+        }
+      }
+
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+}
+
+// Generate invoice PDF endpoint
+app.post('/api/generate-invoice', async (req, res) => {
+  try {
+    const { order, salesmanInfo } = req.body;
+
+    console.log('Generating invoice PDF...');
+    console.log('Order:', order?.invoiceNumber, 'Customer:', order?.customerName);
+
+    if (!order) {
+      return res.status(400).json({ error: 'order is required' });
+    }
+
+    // Generate the PDF
+    const pdfBuffer = await generateInvoicePDF(order, salesmanInfo || {});
+    console.log('PDF generated, size:', pdfBuffer.length, 'bytes');
+
+    // Upload to Supabase Storage
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const timestamp = Date.now();
+    const invoiceId = order.invoiceNumber || `INV-${timestamp}`;
+    const fileName = `invoices/${invoiceId.replace(/[^a-zA-Z0-9-]/g, '-')}-${timestamp}.pdf`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('everfresh-media')
+      .upload(fileName, pdfBuffer, {
+        contentType: 'application/pdf',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      return res.status(500).json({ error: 'Upload failed', details: uploadError.message });
+    }
+
+    const pdfUrl = `${SUPABASE_URL}/storage/v1/object/public/everfresh-media/${fileName}`;
+    console.log('Success! PDF URL:', pdfUrl);
+
+    return res.json({ success: true, pdfUrl });
+
+  } catch (error) {
+    console.error('Error generating invoice:', error);
     return res.status(500).json({ error: error.message });
   }
 });
